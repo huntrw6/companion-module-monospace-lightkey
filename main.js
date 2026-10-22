@@ -1,5 +1,7 @@
 import { InstanceBase, InstanceStatus, Regex } from '@companion-module/base'
 import UpgradeScripts from './upgrades.js'
+import { LightkeyApi } from './lightkey-api.js'
+import * as feedbacks from './feedbacks.js'
 
 export { UpgradeScripts }
 
@@ -16,14 +18,31 @@ export default class LightkeyInstance extends InstanceBase {
 		this.updateStatus(InstanceStatus.Ok)
 
 		this.updateActions() // export actions
+
+		// Optional: live state from the lightkey-api agent. Nothing starts unless an address is set.
+		this.lkApi = new LightkeyApi({
+			log: (msg) => this.log('debug', msg),
+			onFixtures: (names) => feedbacks.define(this, names),
+			onState: (changed) => feedbacks.publish(this, changed),
+			onStatus: (ok, message) => {
+				this.updateStatus(ok ? InstanceStatus.Ok : InstanceStatus.ConnectionFailure, ok ? null : message)
+				this.checkFeedbacks('lightkeyApiConnected')
+			},
+		})
+		this.lkApi.start(config.apiAddress)
 	}
 	// When module gets deleted
 	async destroy() {
 		this.log('debug', 'destroy')
+		if (this.lkApi) this.lkApi.stop()
 	}
 
 	async configUpdated(config) {
 		this.config = config
+		if (this.lkApi) {
+			this.updateStatus(InstanceStatus.Ok)
+			this.lkApi.start(config.apiAddress)
+		}
 	}
 
 	// Return config fields for web config
@@ -43,6 +62,22 @@ export default class LightkeyInstance extends InstanceBase {
 				width: 4,
 				regex: Regex.PORT,
 				default: '21600',
+			},
+			{
+				type: 'static-text',
+				id: 'apiInfo',
+				width: 12,
+				label: 'Live feedback (optional)',
+				value:
+					'Lightkey sends no state back over OSC. To get feedbacks, variables and presets, run lightkey-api 0.4.3 or newer on the Lightkey computer (github.com/huntrw6/lightkey-api) and enter its address below. Leave it empty to use only the actions.',
+			},
+			{
+				type: 'textinput',
+				id: 'apiAddress',
+				label: 'lightkey-api address',
+				width: 8,
+				regex: '/^$|^(https?:\\/\\/)?[A-Za-z0-9.-]+(:\\d{1,5})?\\/?$/',
+				tooltip: 'For example 10.30.0.211 (port 8770 is the default). The agent must allow this computer.',
 			},
 		]
 	}
